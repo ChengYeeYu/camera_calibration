@@ -1,0 +1,4 @@
+[submodule "ros2_ws/src/image_pipeline"]
+	path = ros2_ws/src/image_pipeline
+	url = https://github.com/ros-perception/image_pipeline.git
+	branch = jazzy
