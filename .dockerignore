@@ -1,0 +1,7 @@
+# keep the build context small: only Dockerfile + ros2_ws/src are needed at image-build time
+images/
+calib/
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+**/__pycache__/

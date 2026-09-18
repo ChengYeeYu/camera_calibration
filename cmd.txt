@@ -1,0 +1,61 @@
+Camera calibration — command cheat-sheet
+One-time: attach USB camera to WSL
+
+# Windows PowerShell (admin)
+winget install usbipd
+usbipd list                          # find BUSID, e.g. 2-3
+usbipd bind --busid 2-3              # once per device
+
+# every plug-in / reboot
+usbipd attach --wsl --busid 2-3
+usbipd detach --wsl --busid 2-3      # give it back to Windows when done
+
+# WSL
+sudo modprobe uvcvideo
+ls /dev/video*                       # expect /dev/video0
+Container lifecycle
+
+cd ~/Projects/camera_calibration
+docker compose build                 # only after editing Dockerfile
+docker compose up -d                 # start container "camcal"
+docker compose exec ros bash         # open a shell (repeat for more terminals)
+docker compose down                  # stop
+(Or ad-hoc: docker compose run --rm ros, then docker exec -it <name> bash for a 2nd shell.)
+
+Inside the container
+
+v4l2-ctl -d /dev/video0 --list-formats-ext                # supported formats/fps
+
+# terminal 1 — camera driver
+ros2 run usb_cam usb_cam_node_exe --ros-args \
+  -p video_device:=/dev/video0 -p pixel_format:=mjpeg2rgb \
+  -p image_width:=1280 -p image_height:=720 -p framerate:=30.0
+
+# terminal 2 — check / view
+ros2 topic hz /image_raw
+ros2 run image_view image_view --ros-args -r image:=/image_raw
+
+# terminal 2 — calibrate (8x6 inner corners, 25 mm squares)
+ros2 run camera_calibration cameracalibrator \
+  --size 8x6 --square 0.025 \
+  --ros-args -r image:=/image_raw -r camera/set_camera_info:=/usb_cam/set_camera_info
+
+# → CALIBRATE → SAVE → COMMIT ; then press q in the window. Result in /tmp/calibrationdata.tar.gz
+cp /tmp/calibrationdata.tar.gz /work/calib/ && tar -xzf /work/calib/calibrationdata.tar.gz -C /work/calib ost.yaml
+Helpers (scripts/)
+
+scripts/calib_live.sh 8x6 0.025 /dev/video0              # driver + calibrator + copy result
+scripts/calib_from_images.sh 8x6 0.025                   # calibrate from photos in images/
+Source workspace
+
+cd /work/ros2_ws
+colcon build --packages-up-to camera_calibration --symlink-install
+source install/setup.bash            # auto-sourced in new shells
+ros2 pkg prefix camera_calibration   # → /work/ros2_ws/install/...
+Reuse the calibration later
+
+# camera_name must match the name inside ost.yaml (calibrator default: narrow_stereo), else a mismatch warning
+ros2 run usb_cam usb_cam_node_exe --ros-args -p video_device:=/dev/video0 -p pixel_format:=mjpeg2rgb \
+  -p image_width:=1280 -p image_height:=720 \
+  -p camera_name:=narrow_stereo -p camera_info_url:=file:///work/calib/ost.yaml
+ros2 topic echo /camera_info --once   # K/D should be the calibrated values
