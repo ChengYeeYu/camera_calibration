@@ -22,6 +22,7 @@ Other sizes (e.g. 640x480, 1280x720) are not camera modes and make `usb_cam` abo
 6. [Use the calibration](#6-use-the-calibration)
 7. [Troubleshooting](#7-troubleshooting)
 8. [Source workspace](#8-source-workspace-ros2_ws)
+9. [Vehicle setup (Jetson)](#9-vehicle-setup-jetson)
 
 ## 1. Attach the camera to WSL
 
@@ -70,7 +71,8 @@ v4l2-ctl -d /dev/video0 -l                    # controls (brightness, gain, expo
 ```bash
 docker compose run --rm ros python3 scripts/make_checkerboard.py 8 6 25   # -> calib/checkerboard_8x6_25mm.png
 ```
-Print at 100% scale, glue to something flat, **measure a square with a ruler** — use that
+Print at 100% scale on plain paper (not laminated — glare from lamination hurts corner
+detection and accuracy), glue to something flat, **measure a square with a ruler** — use that
 value (in metres) for `--square`. `8x6` = inner corners, not squares. The examples below use
 `0.024` (the measured size of the current print).
 
@@ -201,3 +203,50 @@ ros2 pkg prefix camera_calibration   # -> /work/ros2_ws/install/...
 `install/setup.bash` is auto-sourced in new shells and by the `scripts/*.sh` helpers, so the
 source build overlays the apt package. Delete `ros2_ws/install/` to go back to the apt package.
 Note: `build/ install/ log/` live on the Windows-mounted drive — first build is slower; fine after.
+
+## 9. Vehicle setup (Jetson)
+
+Deploying a calibrated camera to a vehicle. `VEHICLE` below is the vehicle you're setting up.
+
+### 9a. Setup
+
+1. Plug the camera into the Jetson and find its device path:
+   ```bash
+   ls -l /dev/video*
+   ```
+2. In another terminal, run the camera setup script and enter that path (e.g. `/dev/video0`):
+   ```bash
+   cd ~/robot_ws
+   ./scripts/setup_cameras.sh
+   ```
+3. Open the workspace in VS Code: `cd ~/robot_ws && code .`
+4. In `src/perception_bringup/config/VEHICLE/`, add your calibration (e.g. `calib/cam_960x600.yaml`)
+   as a `.yaml` in the same format as the existing camera parameter file there.
+5. In `src/perception_bringup/config/VEHICLE/perception_bringup.param.yaml`, under
+   `ros__parameters`, update `calibration_url`, `width`, `height` and `fps` to match.
+   **`fps` must be a double** (`30.0`, not `30`).
+
+### 9b. Test
+
+1. `cd ~/robot_ws`, then `up-VEHICLE` to open the tmux panels.
+2. Open Foxglove (use the browser version if the desktop app doesn't run on the Jetson).
+3. In the **Debug** panel, run the Foxglove bridge script.
+4. In the **Main** panel, run the Perception container.
+5. In Foxglove, check that `/VEHICLE/perception/image/compressed` is streaming and that the
+   image width/height match your settings.
+6. In a Debug pane, check the real fps — it should be close to the configured `fps`:
+   ```bash
+   ros2 topic hz /VEHICLE/perception/image/compressed
+   ```
+7. Test segmentation by toggling **Activate YOLO** and **Activate Fusion** in Foxglove (e.g.
+   point the camera at Roboflow images shown on another device).
+
+### 9c. Troubleshooting
+
+Errors show up when the Perception container launches in tmux.
+
+| Symptom | Fix |
+|---|---|
+| Parameter mismatch errors | Check the calibration `.yaml` and `perception_bringup.param.yaml` agree (width, height, `calibration_url`), and that `fps` is a double |
+| Low fps (~10 fps) | Run `v4l2-ctl -d /dev/video0 --list-formats-ext` (use your device path). If the Arducam only lists **960x600 @ 10 fps**, it has fallen back to USB 2.0 — unplug all other USB devices from the Jetson and check again |
+| Insufficient RAM | Browser and VS Code use a lot. Close the browser, run `down-all` then `kill-server` in tmux to stop tmux and all containers, then relaunch |
